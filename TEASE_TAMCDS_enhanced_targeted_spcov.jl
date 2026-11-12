@@ -192,7 +192,6 @@ println("Initial guesses")
 Γ₀ = Γ[:,(u+1):end] #[I(r-u); zeros(u,r-u)]
 
 η_inv = zeros(p,p)
-η_noninv = zeros(u,p)
 η_old = zeros(u,p)
 η = zeros(u,p)
 β = zeros(r,p)
@@ -281,6 +280,8 @@ bigQ₀ = blockdiag([
     end
     for (x,lvlindices) in enumerate(levelindices)]...)
 
+lhs1 = spzeros(u*p,u*p)
+
 counter = 0
 
 ## TEASE estimation
@@ -300,25 +301,32 @@ while fitTEASE
 
     ## η estimation
     println("   η optimization")
-    η_noninv .= 0
-    for t=1:T
-        η_noninv .+= Γ₁data_array_Y_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
+
+    lhs1 .= 0
+    for k in 1:T
+        kdat = data_array_X_project_to_Ψ₁[:,:,k]
+        bigarray = kron(kdat,I(u))
+        rbigarray = bigQ₁ * bigarray'
+        for (colind,colval) in enumerate(eachcol(rbigarray))
+            lhs1[:,colind] .+= vec(reshape(colval,(u,L)) * kdat')
+        end
+    end
+    lhs1 ./= T
+
+    for l=1:L
+        lhs1 .+= μ * kron(I(p),Q₁list[l])
     end
 
-    η_noninv ./= T
+    rhs = (1/T)*sum([begin
+        bigvec = bigQ₁ * vec(Γ₁data_array_Y_project_to_Ψ₁[:,:,k])
+        vec(reshape(bigvec,(u,L)) * data_array_X_project_to_Ψ₁[:,:,k]')
+    end for k in 1:T])
 
-    η_inv .= 0
-    for t=1:T
-        η_inv .+= data_array_X_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
-    end
-
-    η_inv ./= T
-
-    η_inv .+= μ*L*I(p)
+    vecη = lhs1 \ rhs
 
     η_old .= η
     norm_η_old = isone(counter) ? 1.0 : sum(abs2,η_old)
-    η .= (η_inv \ η_noninv')'
+    η .= reshape(vecη, (u,p))
     rmseη = sqrt(sum(abs2,η-η_old)/norm_η_old)
     ηouterproduct .= η*η'
 
@@ -470,7 +478,7 @@ while fitTEASE
     rmseQ₀ = sqrt(sum(abs2,bigQ₀ - bigQ₀guessold))/sqrt(sum(abs2,bigQ₀guessold))
     
     if (rmseQ₀ < ϵ && rmseQ₁ < ϵ && rmseΓ₁η < ϵ) | (counter > maxIter)
-        @save "Dropbox/Mizzou/envelope/output_TAMCDS/TEASE_TAMCDS_enhanced_targeted_spcov.jld2" Γ₁ Γ₀ η bigQ₀ lambda_W alpha_targetedelastic Φ₀ Φ₁ bigQ₁ Q₁list Q₀list κ₀ λᵥ μ
+        @save "Dropbox/Mizzou/envelope/output_TAMCDS/TEASE_TAMCDS_enhanced_targeted_spcov.jld2" Γ₁ Γ₀ η bigQ₀ lambda_W alpha_targetedelastic Φ₀ Φ₁ bigQ₁ Q₁list Q₀list κ₀ λᵥ μ Blist
         break
     end
 end

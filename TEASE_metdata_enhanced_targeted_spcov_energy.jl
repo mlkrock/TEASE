@@ -207,14 +207,12 @@ M = size(Φ₀,2)
 # μvals = 0.0
 # λᵥvals = [10000.0; 1000000.0; 10000000.0; 100000000.0]
 
-μvals = [1.0; 10.0; 100.0; 1000.0; 10000.0]
+μvals = [0.01; 0.1; 1.0; 10.0; 100.0; 1000.0]
 lambda_Wvals = [1.0; 10.0; 100.0; 1000.0; 10000.0]
 λᵥvals = 1000000.0
 
-# alpha_targetedelastic = 1/3
-
-for u in 1:(r-2)
-# for u in 2
+# for u in 1:(r-2)
+for u in 2
 
     biglevelindices = [
         begin
@@ -234,7 +232,6 @@ for u in 1:(r-2)
     Γ₀ = Γ[:,(u+1):end] #[I(r-u); zeros(u,r-u)]
 
     η_inv = zeros(p,p)
-    η_noninv = zeros(u,p)
     η_old = zeros(u,p)
     η = zeros(u,p)
     β = zeros(r,p)
@@ -289,6 +286,7 @@ for u in 1:(r-2)
     Q₁_sum_sq_diff = Vector{Float64}(undef,L)
     Q₀_sum_sq_diff = Vector{Float64}(undef,M)
 
+    lhs1 = spzeros(u*p,u*p)
 
     for μ in μvals
 
@@ -300,7 +298,6 @@ for u in 1:(r-2)
                 η .= 0.0
 
                 η_inv .= 0.0
-                η_noninv .= 0.0
                 η_old .= 0.0
                 η .= 0.0
                 β .= 0.0
@@ -349,25 +346,33 @@ for u in 1:(r-2)
 
                     ## η estimation
                     println("   η optimization")
-                    η_noninv .= 0
-                    for t in 1:T
-                        η_noninv .+= Γ₁data_array_Y_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
+                    
+                    lhs1 .= 0
+
+                    for k in 1:T
+                        kdat = data_array_X_project_to_Ψ₁[:,:,k]
+                        bigarray = kron(kdat,I(u))
+                        rbigarray = bigQ₁ * bigarray'
+                        for (colind,colval) in enumerate(eachcol(rbigarray))
+                            lhs1[:,colind] .+= vec(reshape(colval,(u,L)) * kdat')
+                        end
+                    end
+                    lhs1 ./= T
+
+                    for l=1:L
+                        lhs1 .+= μ * kron(I(p),Q₁list[l])
                     end
 
-                    η_noninv ./= T
+                    rhs = (1/T)*sum([begin
+                        bigvec = bigQ₁ * vec(Γ₁data_array_Y_project_to_Ψ₁[:,:,k])
+                        vec(reshape(bigvec,(u,L)) * data_array_X_project_to_Ψ₁[:,:,k]')
+                    end for k in 1:T])
 
-                    η_inv .= 0
-                    for t in 1:T
-                        η_inv .+= data_array_X_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
-                    end
-
-                    η_inv ./= T
-
-                    η_inv .+= μ*L*I(p)
+                    vecη = lhs1 \ rhs
 
                     η_old .= η
                     norm_η_old = isone(counter) ? 1.0 : sum(abs2,η_old)
-                    η .= (η_inv \ η_noninv')'
+                    η .= reshape(vecη, (u,p))
                     rmseη = sqrt(sum(abs2,η-η_old)/norm_η_old)
                     ηouterproduct .= η*η'
 

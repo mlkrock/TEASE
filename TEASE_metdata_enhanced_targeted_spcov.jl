@@ -98,8 +98,8 @@ maxIter = 50
 δ = 1e-7
 δinv = 1.0/δ
 
-μ = 10.0 #enhanced penalty
-lambda_W = 10.0 
+μ = 0.1 #enhanced penalty
+lambda_W = 1000.0 
 λᵥ = 1000000.0
 alpha_targetedelastic = 1/3
 
@@ -309,6 +309,8 @@ bigQ₀ = blockdiag([
     end
     for (x,lvlindices) in enumerate(levelindices)]...)
 
+lhs1 = spzeros(u*p,u*p)
+
 counter = 0
 
 ## TEASE estimation
@@ -328,25 +330,32 @@ while fitTEASE
 
     ## η estimation
     println("   η optimization")
-    η_noninv .= 0
-    for t=1:T
-        η_noninv .+= Γ₁data_array_Y_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
+
+    lhs1 .= 0
+    for k in 1:T
+        kdat = data_array_X_project_to_Ψ₁[:,:,k]
+        bigarray = kron(kdat,I(u))
+        rbigarray = bigQ₁ * bigarray'
+        for (colind,colval) in enumerate(eachcol(rbigarray))
+            lhs1[:,colind] .+= vec(reshape(colval,(u,L)) * kdat')
+        end
+    end
+    lhs1 ./= T
+
+    for l=1:L
+        lhs1 .+= μ * kron(I(p),Q₁list[l])
     end
 
-    η_noninv ./= T
+    rhs = (1/T)*sum([begin
+        bigvec = bigQ₁ * vec(Γ₁data_array_Y_project_to_Ψ₁[:,:,k])
+        vec(reshape(bigvec,(u,L)) * data_array_X_project_to_Ψ₁[:,:,k]')
+    end for k in 1:T])
 
-    η_inv .= 0
-    for t=1:T
-        η_inv .+= data_array_X_project_to_Ψ₁[:,:,t] * data_array_X_project_to_Ψ₁[:,:,t]'
-    end
-
-    η_inv ./= T
-
-    η_inv .+= μ*L*I(p)
+    vecη = lhs1 \ rhs
 
     η_old .= η
     norm_η_old = isone(counter) ? 1.0 : sum(abs2,η_old)
-    η .= (η_inv \ η_noninv')'
+    η .= reshape(vecη, (u,p))
     rmseη = sqrt(sum(abs2,η-η_old)/norm_η_old)
     ηouterproduct .= η*η'
 
@@ -519,7 +528,7 @@ while fitTEASE
     end
     
     if (rmseQ₀ < ϵ && rmseQ₁ < ϵ && rmseΓ₁η < ϵ && rmseα < ϵ) | (counter > maxIter)
-        @save "Dropbox/Mizzou/envelope/output_metdata/TEASE_metdata_enhanced_targeted_spcov.jld2" Γ₁ Γ₀ η bigQ₀ lambda_W alpha_targetedelastic Φ₀ Φ₁ bigQ₁ Q₁list Q₀list κ₀ λᵥ α μ
+        @save "Dropbox/Mizzou/envelope/output_metdata/TEASE_metdata_enhanced_targeted_spcov.jld2" Γ₁ Γ₀ η bigQ₀ lambda_W alpha_targetedelastic Φ₀ Φ₁ bigQ₁ Q₁list Q₀list κ₀ λᵥ α μ Blist
         break
     end
 end
@@ -772,7 +781,7 @@ if exampleplot
         fig[1, 1]; # any cell of the figure's layout
         limits = (lonlims,latlims)
         )
-        sc = scatter!(lonlatgrid[:,1], lonlatgrid[:,2]; colorrange = (-.38,.38), color = CrossCorMat[:,2], strokecolor = (:black, 0.2), colormap = reverse(ColorSchemes.RdBu_5.colors))
+        sc = scatter!(lonlatgrid[:,1], lonlatgrid[:,2]; colorrange = (-.21,.21), color = CrossCorMat[:,2], strokecolor = (:black, 0.2), colormap = reverse(ColorSchemes.RdBu_5.colors))
         cb1 = Colorbar(fig[1,2],sc; height = Relative(0.65))
         lines!(ga, GeoMakie.coastlines(),color=:black)
         fig
